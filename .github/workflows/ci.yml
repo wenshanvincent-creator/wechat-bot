@@ -1,0 +1,21 @@
+name: Offline checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q
+      - run: node --check runtime/console/app.js && node --check runtime/console/timetable.js
+      - run: bash -n deploy/first-start.sh deploy/install-admin-executor.sh deploy/setup-ip-https.sh

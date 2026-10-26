@@ -1,0 +1,5 @@
+FROM attention-wechat-desktop:4.1.13.26-trial-atspi
+RUN /lsiopy/bin/python3 -m pip install --no-cache-dir langmem==0.0.30
+RUN /lsiopy/bin/python3 -m pip install --no-cache-dir tokenizers==0.21.4
+COPY assets/deepseek-v4-tokenizer/ /opt/deepseek-tokenizer/
+ENV LANGSMITH_TRACING=false LANGCHAIN_TRACING_V2=false

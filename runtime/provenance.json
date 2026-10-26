@@ -1,0 +1,39 @@
+[
+  {
+    "source": "Attention/wechat-local/source/native-data/consumer_state.py",
+    "file": "consumer_state.py",
+    "sha256": "4bb7669e35b8e808d37c0d7dd16e33bf2d371ddf9de2834e18d71ccbead8325d"
+  },
+  {
+    "source": "Attention/wechat-local/source/native-data/native_cli.py",
+    "file": "native_cli.py",
+    "sha256": "e0032005d472c2ad3bdbdd74fa58ec555556b9c7efc4b61ce3b4c5304552dfe7"
+  },
+  {
+    "source": "Attention/wechat-local/native-runtime/native_keys.py",
+    "file": "native_keys.py",
+    "sha256": "24e2b22e0eeb5f7e7862fd134e4076f38482f5b439323d7ca75decb4c6fb7be3",
+    "adapted_sha256": "8af136d4633301ebb348c232b944970691ff2f455e63676e26bddf6ea7ce6672",
+    "adaptation": "Only discover contact.db, session.db and ordinary message_N.db shards; unrelated image-resource and FTS keys do not gate the reader."
+  },
+  {
+    "source": "Attention/wechat-local/source/native-data/native_reader.py",
+    "file": "native_reader.py",
+    "sha256": "809af4ca7f4b3286d2b49d6f8a3c14d085c6a806c0d1ce29cc110d8181937e73"
+  },
+  {
+    "source": "Attention/wechat-local/source/native-data/native_text.py",
+    "file": "native_text.py",
+    "sha256": "6f569d8e1cc63d37402ecde3ac5e20a32de72f74dfe77bac600fbbe67992fd9a"
+  },
+  {
+    "source": "Attention/wechat-local/source/native-data/wal_snapshot.py",
+    "file": "wal_snapshot.py",
+    "sha256": "2c12caeeff1b3869e0dabe3798eb9ce6aa50f34f7e08df055ee955305b468fbb"
+  },
+  {
+    "source": "Attention/wechat-local/source/filehelper-runtime.py",
+    "file": "desktop_helpers.py",
+    "sha256": "c6287a4bf0028603713874cd63346ed94a9bf640d06fed1915cd36f8ae5273cd"
+  }
+]

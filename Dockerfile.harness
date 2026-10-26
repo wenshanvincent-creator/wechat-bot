@@ -1,0 +1,5 @@
+FROM wechat-deepseek-memory:local
+RUN /lsiopy/bin/python3 -m pip install --no-cache-dir --index-url https://pypi.org/simple deepseek-harness-sdk==0.2.1rc2
+USER 2000:2000
+WORKDIR /workspace
+ENTRYPOINT ["/lsiopy/bin/python3", "-u", "/bot/harness_service.py"]

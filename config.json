@@ -1,0 +1,12 @@
+{
+  "enabled": false,
+  "account_ref": "",
+  "self_sender_id": "",
+  "model": "deepseek-flash",
+  "context_window_tokens": 1000000,
+  "context_compress_ratio": 0.5,
+  "groups": [],
+  "poll_seconds": 30,
+  "max_event_age_seconds": 180,
+  "timezone": "Asia/Shanghai"
+}

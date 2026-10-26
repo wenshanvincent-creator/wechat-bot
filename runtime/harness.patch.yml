@@ -1,0 +1,8 @@
+- id: session-log-deepseek
+  config:
+    enabled: false
+- id: compaction-basic
+  config:
+    thresholdRatio: 0.5
+    headroomTokens: 4096
+    maxTokens: 4096

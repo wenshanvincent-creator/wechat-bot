@@ -1,0 +1,137 @@
+name: wechat-agent
+services:
+  initialize:
+    profiles: [setup]
+    image: attention-wechat-desktop:4.1.13.26-trial-atspi
+    pull_policy: never
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - mkdir -p /data/profile /data/state/ui; chown 1000:1000 /data/profile /data/state/ui; chmod 700 /data/profile /data/state/ui; chmod 711 /data/state; chown 2000:2000 /workspace /harness; chmod 700 /workspace; chmod 755 /harness /broker
+    volumes: [agent-data:/data, agent-workspace:/workspace, harness-ipc:/harness, broker-ipc:/broker]
+    restart: "no"
+  desktop:
+    image: attention-wechat-desktop:4.1.13.26-trial-atspi
+    pull_policy: never
+    hostname: wechat-agent
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Asia/Shanghai
+      LC_ALL: zh_CN.UTF-8
+      TITLE: Whale WeChat
+      CUSTOM_USER: bot
+      PASSWORD: ${WECHAT_DESKTOP_PASSWORD:?Set desktop password privately}
+      AUTO_START_WECHAT: "true"
+      AUTO_START_QQ: "false"
+      ENABLE_WECHAT_NIGHTLY_RESTART: "false"
+      ENABLE_WECHAT_AUTO_LOGIN: "false"
+      SELKIES_MANUAL_WIDTH: "1280"
+      SELKIES_MANUAL_HEIGHT: "800"
+    ports: ["127.0.0.1:13331:3000"]
+    volumes:
+      - type: volume
+        source: agent-data
+        target: /config
+        volume: {subpath: profile}
+      - type: volume
+        source: agent-data
+        target: /opt/wechat-server/profile
+        read_only: true
+        volume: {subpath: profile}
+      - type: volume
+        source: agent-data
+        target: /state
+        volume: {subpath: state}
+      - ../runtime:/bot:ro
+    cap_add: [SYS_PTRACE]
+    mem_limit: 1100m
+    memswap_limit: 1600m
+    shm_size: 256m
+    pids_limit: 512
+    restart: unless-stopped
+    logging: {driver: json-file, options: {max-size: 5m, max-file: "2"}}
+  console:
+    image: wechat-deepseek-memory:local
+    pull_policy: never
+    entrypoint: [/lsiopy/bin/python3, -u, /bot/console_server.py]
+    ports: ["127.0.0.1:13332:8090"]
+    volumes:
+      - ../runtime:/bot:ro
+      - ../config.json:/bot-config/config.json:ro
+      - ../personality.md:/bot-config/personality.md:ro
+      - ./.env:/bot-config/secrets.env:ro
+      - type: volume
+        source: agent-data
+        target: /state
+        volume: {subpath: state}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp:size=24m]
+    mem_limit: 192m
+    restart: unless-stopped
+    logging: {driver: json-file, options: {max-size: 5m, max-file: "2"}}
+  worker:
+    image: wechat-deepseek-memory:local
+    pull_policy: never
+    pid: service:desktop
+    network_mode: service:desktop
+    depends_on: [desktop, console, harness]
+    entrypoint: [/lsiopy/bin/python3, -u, /bot/agent_worker.py]
+    environment: {DISPLAY: ":1", TZ: Asia/Shanghai}
+    volumes:
+      - ../runtime:/bot:ro
+      - ../config.json:/bot-config/config.json:ro
+      - ../personality.md:/bot-config/personality.md:ro
+      - ./.env:/bot-config/secrets.env:ro
+      - type: volume
+        source: agent-data
+        target: /config
+        read_only: true
+        volume: {subpath: profile}
+      - type: volume
+        source: agent-data
+        target: /opt/wechat-server/profile
+        read_only: true
+        volume: {subpath: profile}
+      - type: volume
+        source: agent-data
+        target: /state
+        volume: {subpath: state}
+      - broker-ipc:/broker
+      - harness-ipc:/harness:ro
+    cap_drop: [ALL]
+    cap_add: [SYS_PTRACE, DAC_READ_SEARCH, SETUID, SETGID]
+    read_only: true
+    tmpfs: [/tmp:size=48m]
+    mem_limit: 512m
+    memswap_limit: 640m
+    pids_limit: 160
+    stop_grace_period: 45s
+    restart: unless-stopped
+    logging: {driver: json-file, options: {max-size: 5m, max-file: "2"}}
+  harness:
+    image: wechat-deepseek-harness:local
+    pull_policy: never
+    network_mode: none
+    user: "2000:2000"
+    environment: {HOME: /tmp/home, TZ: Asia/Shanghai, DSH_TELEMETRY_MODE: DISABLED}
+    volumes:
+      - ../runtime:/bot:ro
+      - agent-workspace:/workspace
+      - harness-ipc:/harness
+      - broker-ipc:/broker:ro
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: ["/tmp:size=192m,exec,mode=1777"]
+    mem_limit: 640m
+    memswap_limit: 800m
+    pids_limit: 128
+    restart: unless-stopped
+    logging: {driver: json-file, options: {max-size: 5m, max-file: "2"}}
+volumes:
+  agent-data:
+  agent-workspace:
+  harness-ipc:
+  broker-ipc:

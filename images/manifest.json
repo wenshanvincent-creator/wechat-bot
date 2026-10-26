@@ -1,0 +1,26 @@
+{
+  "created_at": "2026-10-25T08:52:14.947755+00:00",
+  "images": [
+    {
+      "image_ref": "attention-wechat-desktop:4.1.13.26-trial-atspi",
+      "id": "sha256:c4fb1ef9dc0c904d272155683b630ab630efa5fcd9f203feb393ba07faaee6bd",
+      "os": "linux",
+      "architecture": "amd64",
+      "size_bytes": 5596231156
+    },
+    {
+      "image_ref": "wechat-deepseek-memory:local",
+      "id": "sha256:bf67e5871447a0b109d1b0839de021025fbd5b07e34e7499ab523ac9c95ed766",
+      "os": "linux",
+      "architecture": "amd64",
+      "size_bytes": 5819137532
+    },
+    {
+      "image_ref": "wechat-deepseek-harness:local",
+      "id": "sha256:bd8efb8303c596b7777405534a124046fdc2bbebc66f7cdf52f20f9412b5d338",
+      "os": "linux",
+      "architecture": "amd64",
+      "size_bytes": 6238593296
+    }
+  ]
+}
