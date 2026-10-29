@@ -35,7 +35,7 @@ def process_identity():
             start = (proc / 'stat').read_text(encoding='utf-8').rsplit(')', 1)[1].split()[19]
             namespace = next(line.split(':', 1)[1].split() for line in status if line.startswith('NSpid:'))
             matches.append((int(proc.name), int(namespace[-1]), start))
-        except FileNotFoundError:
+        except (FileNotFoundError,ProcessLookupError):
             continue  # A process exited while the namespace was being enumerated.
     if len(matches) != 1:
         raise RuntimeError('Expected one WeChat main process in desktop PID namespace')
@@ -77,7 +77,7 @@ def active_account_roots(identity):
     for descriptor in (proc/'fd').iterdir():
         try:
             target=descriptor.readlink()
-        except FileNotFoundError:
+        except (FileNotFoundError,ProcessLookupError):
             continue
         if str(target).startswith('/config/'):
             open_paths.add(PROFILE/target.relative_to('/config'))
@@ -85,12 +85,32 @@ def active_account_roots(identity):
     return roots
 
 
-def discover(identity):
-    roots=active_account_roots(identity)
+class NativeAccountUnavailable(RuntimeError):
+    pass
+
+
+def current_account_root(identity):
+    # Qt can close/reopen descriptors while a snapshot is being enumerated.
+    # Retry only an empty result; ambiguity and process changes fail closed.
+    for delay in (0, .15, .35):
+        if delay:time.sleep(delay)
+        if process_identity()!=identity:
+            raise RuntimeError('WeChat process changed; create a new reader')
+        roots=active_account_roots(identity)
+        if roots:break
     if not roots:
-        raise RuntimeError('WeChat login required: no active account database. Check wechat_status.nativeAccount; do not retry each group or contact.')
+        raise NativeAccountUnavailable('WeChat login required: no active account database. Check wechat_status.nativeAccount; do not retry each group or contact.')
     if len(roots)!=1:
         raise RuntimeError('Multiple active account database roots; do not choose an account by guesswork')
+    return roots[0]
+
+
+def account_reference(root):
+    return hashlib.sha256(str(root.relative_to(PROFILE)).encode()).hexdigest()[:24]
+
+
+def discover(identity):
+    roots=[current_account_root(identity)]
     databases=[]
     for root in roots:
         for path in sorted(root.rglob('*.db')):

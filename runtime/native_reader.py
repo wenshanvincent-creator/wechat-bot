@@ -9,7 +9,7 @@ import json
 import re
 from datetime import datetime, timezone
 
-from native_keys import PROFILE, discover, process_identity, scan
+from native_keys import PROFILE, discover, process_identity, scan, current_account_root, account_reference, NativeAccountUnavailable
 from native_text import decode_text
 from native_media import metadata as media_metadata
 from wal_snapshot import connect
@@ -32,17 +32,26 @@ def _unpack(value):
 
 
 class NativeReader:
-    def __init__(self, private_ids=()):
+    def __init__(self, private_ids=(), expected_account=None):
         self.private_ids=frozenset(private_ids)
         self.identity = process_identity()
-        self.databases = discover(self.identity)
-        self.keys, self.scan_stats = scan(self.databases, self.identity)
-        if len(self.keys) != len(self.databases):
-            raise RuntimeError('Some native database keys were not authenticated')
+        try:
+            self.databases = discover(self.identity)
+        except NativeAccountUnavailable:
+            if not expected_account:raise
+            from native_recovery import wake_bound_account
+            wake_bound_account(expected_account,self.identity)
+            self.databases = discover(self.identity)
         roots = {item['path'].parent.parent for item in self.databases}
         if len(roots) != 1:
             raise RuntimeError('Database account root is ambiguous')
-        self.account_ref = hashlib.sha256(str(next(iter(roots)).relative_to(PROFILE)).encode()).hexdigest()[:24]
+        self.account_ref = account_reference(next(iter(roots)))
+        if expected_account and self.account_ref!=expected_account:
+            raise RuntimeError('登录账号与绑定账号不同')
+        self.keys, self.scan_stats = scan(self.databases, self.identity)
+        if len(self.keys) != len(self.databases):
+            raise RuntimeError('Some native database keys were not authenticated')
+
 
     def _open(self, item):
         if process_identity() != self.identity:
@@ -339,3 +348,9 @@ class NativeReader:
                 'coverage': 'this server client native unread index; missing local rows explicitly listed',
                 'order': 'native first-unread pointer first; remaining index create_time/server_id ascending',
                 'wechat_read_state_modified': False, 'consumer_progress_modified': False}
+
+    def assert_active_account(self):
+        if account_reference(current_account_root(self.identity))!=self.account_ref:
+            raise RuntimeError('登录账号与绑定账号不同')
+
+

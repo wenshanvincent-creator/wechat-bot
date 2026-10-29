@@ -22,6 +22,9 @@ from model_view import GroupView
 from moments import Moments
 from native_reader import NativeReader
 from native_keys import active_account_roots
+from native_recovery import live_ready
+from session_health import SessionHealth,SessionUIError,blocked_send_jobs
+from wal_snapshot import SnapshotChanged
 from proactive import schedule
 from agent_tools import AgentTools
 from harness_broker import start as start_broker,issue,revoke,call
@@ -45,17 +48,28 @@ def directory(control,reader,self_id):
 
 def collect():
     control=ControlStore(ROOT);progress=ConsumerState(ROOT/'consumer-v2.sqlite');reader=None;inflight=set();last_directory=0
+    health=SessionHealth(control);health.start()
     while not STOP.is_set():
         try:
             account=control.meta('account',{});self_id=account.get('self_sender_id','')
             channels=[c for c in control.list('channels') if c.get('enabled') and c.get('allow_read')]
             private={c['native_id'] for c in channels if c['kind']=='friend'}
-            if reader is None or reader.private_ids!=private:reader=NativeReader(private_ids=private)
+            rebuilt=reader is None or reader.private_ids!=private
+            if rebuilt:reader=NativeReader(private_ids=private,expected_account=account.get('account_ref'))
+            reader.assert_active_account()
             if not account.get('account_ref'):
-                directory(control,reader,'');control.set_meta('runtime',{'status':'attention','message':'微信已登录，请先在控制台绑定当前账号','heartbeat':time.time()});STOP.wait(3);continue
+                directory(control,reader,'');health.unbound();STOP.wait(3);continue
             if reader.account_ref!=account['account_ref']:raise RuntimeError('登录账号与绑定账号不同')
+            if rebuilt:
+                try:run_ui('/bot/ui_session.py',{'account_ref':reader.account_ref,'wechat_pid':reader.identity[1],'start_ticks':reader.identity[2]})
+                except (RuntimeError,OSError) as error:raise SessionUIError('绑定窗口身份恢复失败') from error
+                reader.assert_active_account();last_directory=0
             while not ACK.empty():
-                channel,batch=ACK.get_nowait();progress.acknowledge(reader,channel,'v2',batch);inflight.discard(channel)
+                channel,batch=ACK.get_nowait()
+                try:progress.acknowledge(reader,channel,'v2',batch)
+                except SnapshotChanged:
+                    ACK.put((channel,batch));raise
+                inflight.discard(channel)
             if time.time()-last_directory>300:
                 directory(control,reader,self_id);last_directory=time.time()
             for channel in channels:
@@ -72,12 +86,18 @@ def collect():
                 queue_for_media = any(m.get('media') for m in messages)
                 target = MEDIA if queue_for_media else INBOX
                 target.put((channel,messages,view,batch['batch_id']),timeout=2);inflight.add(native)
-            control.set_meta('runtime',{'status':'ready','message':'微信本地缓存可读；自动发送由总开关控制','heartbeat':time.time(),'account_ref':reader.account_ref})
+            health.ready(reader)
             STOP.wait(control.meta('settings',{}).get('poll_seconds',3))
+        except SnapshotChanged:
+            try:health.read_busy(reader)
+            except Exception as error:
+                delay=health.failed(error);reader=None;STOP.wait(delay);continue
+            STOP.wait(.3)
         except Exception as error:
-            control.set_meta('runtime',{'status':'attention','message':'微信读取需要检查：'+type(error).__name__,'heartbeat':time.time()})
-            reader=None;STOP.wait(10)
+            delay=health.failed(error)
+            reader=None;STOP.wait(delay)
     progress.close();control.close()
+
 
 
 def resolve_media(kernel):
@@ -277,7 +297,7 @@ def main():
             except Exception as error:result={'error':str(error) if isinstance(error,RuntimeError) else type(error).__name__};state='failed'
             current=control.db.execute('SELECT state FROM jobs WHERE id=?',(old['id'],)).fetchone()
             if current and current['state']!='cancelled':control.finish_job(old['id'],state,result);tool_feedback(control,kernel,old,result)
-        job=control.take_job(exclude=('tool',) if running else ())
+        job=control.take_job(exclude=blocked_send_jobs(control)+(('tool',) if running else ()))
         if job:
             try:
                 if job['kind']=='tool':running=(job,pool.submit(background_tool,job))
@@ -286,21 +306,21 @@ def main():
                     if job['kind'] in ('moments_publish','friend_requests','friend_add','friend_accept'):tool_feedback(control,kernel,job,result)
             except Exception as error:
                 control.finish_job(job['id'],'failed',{'error':str(error) if isinstance(error,(ValueError,PermissionError,KeyError,RuntimeError)) else type(error).__name__})
-        if control.meta('settings',{}).get('enabled') and time.time()-last_reminder>=1:
+        if control.meta('settings',{}).get('enabled') and live_ready(control) and time.time()-last_reminder>=1:
             last_reminder=time.time()
             try:classroom.deliver(control,sender,last_reminder)
             except Exception as error:control.activity('error',{'message':'提醒发送异常：'+type(error).__name__})
-        if control.meta('settings',{}).get('enabled') and time.time()-last_timetable>=3:
+        if control.meta('settings',{}).get('enabled') and live_ready(control) and time.time()-last_timetable>=3:
             last_timetable=time.time()
             try:timetable.tick(control,sender,last_timetable)
             except Exception as error:control.activity('error',{'message':'课前提醒异常：'+type(error).__name__})
-        if control.meta('settings',{}).get('enabled') and time.time()-last_outbox>=5:
+        if control.meta('settings',{}).get('enabled') and live_ready(control) and time.time()-last_outbox>=5:
             last_outbox=time.time()
             try:outbox.deliver(control,sender,last_outbox)
             except Exception as error:control.activity('error',{'message':'补发异常：'+type(error).__name__})
-        if control.meta('v2_live_ready',False):
+        if control.meta('v2_live_ready',False) and live_ready(control):
             schedule(control,kernel.turns,time.time());moments_schedule.schedule(control,time.time())
-        if control.meta('settings',{}).get('enabled') and control.meta('v2_live_ready',False):
+        if control.meta('settings',{}).get('enabled') and control.meta('v2_live_ready',False) and live_ready(control):
             for session in control.list('sessions'):
                 try:kernel.step(session['id'])
                 except Exception as error:
