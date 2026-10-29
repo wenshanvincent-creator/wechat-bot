@@ -68,6 +68,7 @@ class Conversation(bounded.Desktop):
             (ROOT/'verified-desktop.json').write_text(
                 json.dumps({**identity,'window_id':self.window.id}),encoding='utf-8')
 
+
     def find_main(self):
         import subprocess
         windows=[]
@@ -79,10 +80,13 @@ class Conversation(bounded.Desktop):
                 owner=window.get_full_property(self.connection.intern_atom('_NET_WM_PID'),X.AnyPropertyType)
                 geo=window.get_geometry();pos=self.root.translate_coords(window,0,0)
             except Exception:continue
-            if owner and int(owner.value[0])==self.pid and (pos.x,pos.y,geo.width,geo.height)==(200,80,880,640):
+            if owner and int(owner.value[0])==self.pid and window.get_wm_class()==('wechat','wechat') and geo.width>=600 and geo.height>=400:
                 windows.append(window)
         if len(windows)!=1:raise RuntimeError('微信主窗口不唯一或已关闭')
+        from window_geometry import restore
+        restore(windows[0],self.root,self.run)
         return windows[0]
+
 
     def check_window(self):
         try:
@@ -100,8 +104,9 @@ class Conversation(bounded.Desktop):
                 json.dumps({**identity,'window_id':self.window.id}),encoding='utf-8')
         if not owner or int(owner.value[0]) != self.pid or self.window.get_wm_class() != ('wechat', 'wechat'):
             raise RuntimeError('Verified WeChat process changed')
-        if (pos.x,pos.y,geom.width,geom.height) != (200,80,880,640):
-            raise RuntimeError('Verified window geometry changed')
+        from window_geometry import restore
+        restore(self.window,self.root,self.run)
+
 
     def check_scope(self):
         self.check_window()
@@ -207,6 +212,7 @@ class Conversation(bounded.Desktop):
         if bounds[2]<490:
             return None
         return {'bounds':bounds,'hash':hashlib.sha256(pane.crop(bounds).tobytes()).hexdigest()}
+
 
 
 def main():
