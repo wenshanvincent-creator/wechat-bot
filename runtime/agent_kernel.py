@@ -321,6 +321,7 @@ class AgentKernel:
                     if sender and not sender.startswith('agent:') and sender!='tool':
                         actor=sender;break
                 tools=self.tool_factory(persona,session,channel,actor)
+                if hasattr(tools,'configure_search'):tools.configure_search(last_text or '')
             attempts=[prompt,
                       prompt+'\n上一次的输出不是合法 JSON。只输出一个 JSON 对象，形如 {"messages":[...]}，不要输出任何其他内容。',
                       prompt+'\n这一轮最多只能发'+str(cap)+'条气泡，少说两句；只输出纯文字气泡，不要用表情。']
