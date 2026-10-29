@@ -1,4 +1,4 @@
-"""Persistent class notices and scheduled group reminders.
+﻿"""Persistent class notices and scheduled group reminders.
 
 Notices are the class's single source of truth for arrangements (time, place,
 owner, materials). Reminders are scheduled messages tied to a notice; they are
@@ -134,12 +134,18 @@ def supersede(control, notice_id, by_id):
     control.set_meta('revision', control.meta('revision', 0) + 1)
 
 
-def add_reminder(control, channel_id, text, when, repeat='none', notice_id=None, created_by=''):
+def add_reminder(control, channel_id, text, when, repeat='none', notice_id=None, created_by='', kind='text', query=''):
     _tables(control)
     content = _text(text, 1000)
     from reply_delivery import humanize
     content = humanize(content)
-    if not content:
+    if kind not in ('text', 'search'):
+        raise ValueError('提醒类型只支持 text / search')
+    if kind == 'search':
+        query = _text(query, 200)
+        if not query:
+            raise ValueError('定时搜索需要搜索词')
+    if not content and kind != 'search':
         raise ValueError('提醒内容不能为空')
     if repeat not in ('none', 'daily', 'weekly'):
         raise ValueError('重复方式只支持 none / daily / weekly')
@@ -154,6 +160,8 @@ def add_reminder(control, channel_id, text, when, repeat='none', notice_id=None,
         'channel_id': channel_id,
         'notice_id': notice_id or '',
         'text': content,
+        'kind': kind,
+        'query': query if kind == 'search' else '',
         'run_at': run_at,
         'repeat': repeat,
         'status': 'scheduled',
@@ -227,6 +235,22 @@ def recover(control):
             _finish(control, item, 'failed', error='运行器重启，发送结果未确认；请核对后手动重发')
 
 
+def _search_answer(control, query, results, page_text=''):
+    """Turn search snippets into a short spoken answer; empty means fall back to the list."""
+    try:
+        from provider_client import ProviderClient
+        provider = control.get('providers', control.meta('settings', {}).get('memory_provider_id') or 'deepseek')
+        client = ProviderClient(provider, control.secret(provider['id']))
+        digest = '\n'.join(result['title'] + '：' + result['summary'] for result in results)
+        prompt = ('根据下面的搜索结果，用两三句中文回答：' + query +
+                  '\n只依据下面的资料，用两三句话给出结论：先给天气和温度，再补一句来源。资料里是天气页的今日数据就直接用，不要纠结页面日期；确实没有数字才说没查到。不要罗列链接，不要用 Markdown。\n\n' + digest + '\n\n网页正文：' + page_text)
+        message, _ = client.complete([{'role': 'user', 'content': prompt}], timeout=45)
+        text = (message.get('content') or '').strip()
+        return text.rstrip('。').strip()
+    except Exception:
+        return ''
+
+
 def deliver(control, sender, now=None):
     """Send every due reminder once and record its real receipt."""
     now = time.time() if now is None else now
@@ -242,8 +266,32 @@ def deliver(control, sender, now=None):
             continue
         item['status'] = 'sending'
         _store(control, item)
+        outgoing = item['text']
+        if item.get('kind') == 'search':
+            from public_web import search
+            try:
+                results = search(item.get('query', ''), 4)
+                if not results:
+                    raise ValueError('没有搜到结果')
+                page_text = ''
+                try:
+                    from public_web import fetch
+                    page_text = ' '.join((fetch(results[0]['link']).get('text') or '').split())[:2500]
+                except Exception:
+                    page_text = ''
+                answer = _search_answer(control, item.get('query', ''), results, page_text)
+                links = ' '.join(result['link'] for result in results[:2])
+                if answer:
+                    outgoing = ((item['text'] + ' ') if item.get('text') else '') + answer + '\n来源：' + links
+                else:
+                    lines = [str(index) + '. ' + result['title'] + '：' + result['summary']
+                             for index, result in enumerate(results[:3], 1)]
+                    outgoing = ((item.get('text') + '\n') if item.get('text') else '搜到这些：\n') \
+                        + '\n'.join(lines) + '\n来源：' + links
+            except Exception as error:
+                outgoing = '搜索「' + item.get('query', '') + '」没成功：' + type(error).__name__
         try:
-            receipt = sender(channel, item['text'], 'rem-' + item['id'], now + 60)
+            receipt = sender(channel, outgoing, 'rem-' + item['id'], now + 60)
         except Exception as error:
             _finish(control, item, 'failed', error=type(error).__name__)
             control.activity('reminder', {'message': '提醒发送失败：' + type(error).__name__, 'id': item['id']})
