@@ -1,4 +1,4 @@
-"""Bounded public HTTP fetch, pinning validated DNS addresses across the connection."""
+﻿"""Bounded public HTTP fetch, pinning validated DNS addresses across the connection."""
 import http.client
 import ipaddress
 import re
@@ -21,7 +21,30 @@ class Text(HTMLParser):
         if not self.ignore and data.strip():self.parts.append(data.strip())
 
 
-def fetch(url,limit=256*1024,*,image=False):
+def search(query, limit=4):
+    """Clean web results from Bing: title, link and a short summary."""
+    import html as html_module
+    from urllib.parse import quote
+    data = fetch('https://www.bing.com/search?q=' + quote(query), raw=True)
+    page = data.get('html') or ''
+    items = []
+    for block in re.findall(r'<li class="b_algo".*?</li>', page, re.S):
+        heading = re.search(r'<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', block, re.S)
+        if not heading:
+            continue
+        title = html_module.unescape(re.sub(r'<[^>]+>', '', heading.group(2))).strip()
+        link = html_module.unescape(heading.group(1))
+        snippet = re.search(r'<p[^>]*>(.*?)</p>', block, re.S)
+        summary = html_module.unescape(re.sub(r'<[^>]+>', ' ', snippet.group(1))) if snippet else ''
+        summary = re.sub(r'\s+', ' ', summary).strip()
+        if title and link:
+            items.append({'title': title, 'link': link, 'summary': summary[:200]})
+        if len(items) >= limit:
+            break
+    return items
+
+
+def fetch(url,limit=256*1024,*,image=False,raw=False):
     for _ in range(5):
         p=urlsplit(url)
         if p.scheme not in ('http','https') or not p.hostname or p.username or p.password:raise ValueError('仅允许无内嵌凭据的公开 HTTP(S) 网页')
@@ -46,6 +69,7 @@ def fetch(url,limit=256*1024,*,image=False):
             if not any(t in media for t in ('text/','application/json')):raise ValueError('网页工具仅接收文本')
             data=response.read(limit+1);encoding=re.search(r'charset=([\w-]+)',media)
             text=data[:limit].decode(encoding[1] if encoding else 'utf-8',errors='replace')
+            if raw:return {'url':url,'html':text,'truncated':len(data)>limit}
             parser=Text();parser.feed(text)
             return {'url':url,'text':'\n'.join(parser.parts)[:16000],'links':list(dict.fromkeys(parser.links))[:30],'truncated':len(data)>limit}
         finally:connection.close()
