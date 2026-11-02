@@ -1,6 +1,7 @@
 """Hosted OpenAI-compatible model adapter; provider-specific parameters stay scoped."""
 import base64
 import json
+import re
 import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
@@ -30,6 +31,35 @@ def reply_items(content):
         elif isinstance(item,dict) and set(item)=={'sticker'} and isinstance(item['sticker'],str):
             if emoji_token(item['sticker']):output.append(emoji_token(item['sticker']));continue
             selected,_=resolve(item['sticker'])
+            output.append(item)
+        else:raise ValueError('模型返回了无效的文字/表情项目')
+    return output
+
+
+def sticker_promise(output):
+    if any(isinstance(item,dict) and 'sticker' in item for item in output):return False
+    text='\n'.join(item for item in output if isinstance(item,str))
+    if any(emoji_token(name) for name in re.findall(r'\[([^\[\]]+)\]',text)):return False
+    return bool(re.search(r'(?:表情|表情包).{0,12}(?:再试|重试|试一次|马上发|这就发|等会发|稍后发)|(?:再试|重试|马上发|这就发).{0,12}(?:表情|表情包)',text))
+
+
+def reply_items(content):
+    if not isinstance(content,str):raise ValueError('回复必须是 JSON 文本')
+    text=content.strip()
+    if text.startswith('```json\n') and text.endswith('\n```'):text=text[8:-4]
+    elif text.startswith('```\n') and text.endswith('\n```'):text=text[4:-4]
+    parsed=json.loads(text)
+    if not isinstance(parsed,dict) or not isinstance(parsed.get('messages'),list):
+        raise ValueError('模型回复缺少 messages 数组')
+    output=[]
+    for item in parsed['messages']:
+        if isinstance(item,str) and item.strip():output.append(normalize_text(item.strip()))
+        elif isinstance(item,dict) and set(item)=={'emoji'} and emoji_token(item['emoji']):
+            output.append(emoji_token(item['emoji']))
+        elif isinstance(item,dict) and set(item)=={'sticker'} and isinstance(item['sticker'],str):
+            if emoji_token(item['sticker']):output.append(emoji_token(item['sticker']));continue
+            selected,_=resolve(item['sticker'])
+            if not selected.get('native'):raise ValueError('请选择当前目录中的微信原生收藏表情；没有可用收藏时只回复文字')
             output.append(item)
         else:raise ValueError('模型返回了无效的文字/表情项目')
     return output
@@ -89,10 +119,21 @@ class ProviderClient:
                 if isinstance(value,int):usage[key]=usage.get(key,0)+value
             usage['last_prompt_tokens']=current.get('prompt_tokens',0)
         def finish(message):
+            expression_retries=0
             for attempt in range(3):
                 try:
                     if message.get('tool_calls'):raise ValueError('纠正回复时不能再次调用工具')
-                    return reply_items(message.get('content')),usage
+                    output=reply_items(message.get('content'))
+                    if sticker_promise(output):
+                        if expression_retries or attempt==2:
+                            return ['这轮没有发出表情，未安排后台重试'],usage
+                        expression_retries+=1
+                        conversation.append({'role':'assistant','content':message.get('content') or ''})
+                        conversation.append({'role':'system','content':'你只口头承诺重试表情，但发送列表没有表情动作。回复结束后没有后台继续。现在直接返回当前目录中合适的 {"sticker":"准确名称"} 或微信默认表情代码；没有合适或可用的表情就明确说明未发送。只返回 messages JSON，不调用工具，不重复已经完成的操作。'})
+                        message,current=self.complete(conversation,json_mode=True)
+                        account(current)
+                        continue
+                    return output,usage
                 except ValueError as error:
                     if attempt==2:
                         raise DecisionFormatError('模型回复格式纠正失败；不自动重做已执行操作') from error
